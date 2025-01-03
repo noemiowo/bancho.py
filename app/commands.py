@@ -9,6 +9,7 @@ import signal
 import time
 import traceback
 import uuid
+import datetime
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
@@ -650,7 +651,7 @@ async def _map(ctx: Context) -> str | None:
         if ctx.args[1] == "set":
             # update all maps in the set
             for _bmap in bmap.set.maps:
-                await maps_repo.partial_update(_bmap.id, status=new_status, frozen=True)
+                await maps_repo.partial_update(id=_bmap.id, status=new_status, frozen=True)
 
             # make sure cache and db are synced about the newest change
             for _bmap in app.state.cache.beatmapset[bmap.set_id].maps:
@@ -658,7 +659,7 @@ async def _map(ctx: Context) -> str | None:
                 _bmap.frozen = True
 
             # select all map ids for clearing map requests.
-            modified_beatmap_ids = [
+            map_ids = [
                 row["id"]
                 for row in await maps_repo.fetch_many(
                     set_id=bmap.set_id,
@@ -667,17 +668,48 @@ async def _map(ctx: Context) -> str | None:
 
         else:
             # update only map
-            await maps_repo.partial_update(bmap.id, status=new_status, frozen=True)
+            await maps_repo.partial_update(id=bmap.id, status=new_status, frozen=True)
 
             # make sure cache and db are synced about the newest change
             if bmap.md5 in app.state.cache.beatmap:
                 app.state.cache.beatmap[bmap.md5].status = new_status
                 app.state.cache.beatmap[bmap.md5].frozen = True
 
-            modified_beatmap_ids = [bmap.id]
+            map_ids = [bmap.id]
 
-        # deactivate rank requests for all ids
-        await map_requests_repo.mark_batch_as_inactive(map_ids=modified_beatmap_ids)
+        await app.state.services.database.execute(
+            "UPDATE map_requests SET active = 0 WHERE map_id IN :map_ids",
+            {"map_ids": map_ids}
+
+    if webhook_url := app.settings.DISCORD_RANK_WEBHOOK:
+        name = f"{bmap.artist} - {bmap.title} ({bmap.creator}) {f'[{bmap.version}]' if ctx.args[1] == 'map' else ''}"
+        color = (
+            52478 if new_status == RankedStatus.Ranked
+            else 16738218 if new_status == RankedStatus.Loved
+            else 0
+        )
+
+        timestamp = datetime.utcnow().isoformat()
+
+        embed = Embed(
+            title="",
+            description=f"[{name}]({bmap.url}) is now {'ranked' if new_status == RankedStatus.Ranked else 'loved' if new_status == RankedStatus.Loved else 'unranked'}!",
+            timestamp=timestamp,
+            color=color
+        )
+        embed.set_author(name=ctx.player.name, icon_url=ctx.player.avatar_url, url=ctx.player.url)
+        embed.set_image(url=f"https://assets.ppy.sh/beatmaps/{bmap.set_id}/covers/card.jpg")
+        embed.set_footer(text="Beatmap Status changed")
+        
+        webhook = Webhook(webhook_url, embeds=[embed])
+        await webhook.post()
+
+    if ctx.args[1] == "set":
+        return f"[{bmap.set.url} {bmap.artist} - {bmap.title}] updated to {new_status!s}."
+    else:
+        return f"{bmap.embed} updated to {new_status!s}."
+
+
 
     return f"{bmap.embed} updated to {new_status!s}."
 
@@ -2438,7 +2470,36 @@ async def clan_leave(ctx: Context) -> str | None:
     return f"You have successfully left {clan_display_name}."
 
 
-# TODO: !clan inv, !clan join, !clan leave
+# TODO: !clan inv, !clan leave
+
+@clan_commands.add(Privileges.UNRESTRICTED, aliases=["J"])
+async def clan_join(ctx: Context)  -> str | None:
+    """Lets a user join a clan."""
+    if not ctx.args:
+        return "Invalid syntax: !clan join <tag>"
+
+    clan = await clans_repo.fetch_one(tag=" ".join(ctx.args).upper())
+    if not clan:
+        return "Could not find a clan by that tag."
+    
+    if ctx.player.clan_id:
+        clan = await clans_repo.fetch_one(id=ctx.player.clan_id)
+        if clan:
+            clan_display_name = f"[{clan['tag']}] {clan['name']}"
+            return f"You're already a member of {clan_display_name}!"
+
+    ctx.player.clan_id = clan["id"]
+    ctx.player.clan_priv = ClanPrivileges.Member
+
+    clan_display_name = f"[{clan['tag']}] {clan['name']}"
+
+    await users_repo.partial_update(
+        ctx.player.id,
+        clan_id=clan["id"],
+        clan_priv=ClanPrivileges.Member,
+    )
+            
+    return f"You have successfully joined {clan_display_name}."
 
 
 @clan_commands.add(Privileges.UNRESTRICTED, aliases=["l"])
