@@ -241,6 +241,3 @@ async def partial_update(
     select_stmt = select(*READ_PARAMS).where(ScoresTable.id == id)
     _score = await app.state.services.database.fetch_one(select_stmt)
     return cast(Score | None, _score)
-
-
-# TODO: delete
