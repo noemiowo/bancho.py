@@ -8,6 +8,7 @@ import logging
 import re
 import struct
 import time
+import os
 from collections.abc import Callable
 from collections.abc import Mapping
 from datetime import date
@@ -670,23 +671,19 @@ async def handle_osu_login_request(
             ),
         }
 
-    if app.settings.DISALLOW_OLD_CLIENTS:
-        allowed_client_versions = await get_allowed_client_versions(
-            osu_version.stream,
-        )
-        # in the case where the osu! api fails, we'll allow the client to connect
-        if (
-            allowed_client_versions is not None
-            and osu_version.date not in allowed_client_versions
-        ):
+    dev_acc = ['"]
+    if login_data["username"].replace(' ', '_').lower() not in dev_acc:
+        if osu_version == 'b':
             return {
-                "osu_token": "client-too-old",
-                "response_body": (
-                    app.packets.version_update()
-                    + app.packets.login_reply(LoginFailureReason.OLD_CLIENT)
-                ),
+                "osu_token": "no",
+                "response_body": (app.packets.notification("Looks like you're on stable!\nPlease use the Miausu Client.")),
             }
-
+        elif str(osu_version.date) != app.settings.ALLOWED_CLIENT_VER:
+            return {
+                "osu_token": "no",
+                "response_body": (app.packets.notification(f'Please update your client!\nYour version: {osu_version.date}\nCurrent version: {os.environ["ALLOWED_CLIENT_VER"]}\nYou can find the new Version on our discord,\ndm me on hyeok2004 (ingame) or pupgvrl (discord).')),
+            }
+    
     adapters, running_under_wine = parse_adapters_string(login_data["adapters_str"])
     if not (running_under_wine or any(adapters)):
         return {
@@ -947,37 +944,6 @@ async def handle_osu_login_request(
                 else:
                     data += app.packets.user_presence(o)
                     data += app.packets.user_stats(o)
-
-        # the player may have been sent mail while offline,
-        # enqueue any messages from their respective authors.
-        mail_rows = await mail_repo.fetch_all_mail_to_user(
-            user_id=player.id,
-            read=False,
-        )
-
-        if mail_rows:
-            sent_to: set[int] = set()
-
-            for msg in mail_rows:
-                # Add "Unread messages" header as the first message
-                # for any given sender, to make it clear that the
-                # messages are coming from the mail system.
-                if msg["from_id"] not in sent_to:
-                    data += app.packets.send_message(
-                        sender=msg["from_name"],
-                        msg="Unread messages",
-                        recipient=msg["to_name"],
-                        sender_id=msg["from_id"],
-                    )
-                    sent_to.add(msg["from_id"])
-
-                msg_time = datetime.fromtimestamp(msg["time"])
-                data += app.packets.send_message(
-                    sender=msg["from_name"],
-                    msg=f'[{msg_time:%a %b %d @ %H:%M%p}] {msg["msg"]}',
-                    recipient=msg["to_name"],
-                    sender_id=msg["from_id"],
-                )
 
         if not player.priv & Privileges.VERIFIED:
             # this is the player's first login, verify their
