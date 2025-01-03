@@ -16,8 +16,8 @@ from typing import Any
 from typing import TypeVar
 
 import databases
-from akatsuki_pp_py import Beatmap
-from akatsuki_pp_py import Calculator
+from miausu_pp_py import Beatmap
+from miausu_pp_py import Calculator
 from redis import asyncio as aioredis
 
 sys.path.insert(0, os.path.abspath(os.pardir))
