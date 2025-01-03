@@ -18,6 +18,7 @@ from functools import cache
 from pathlib import Path as SystemPath
 from typing import Any
 from typing import Literal
+from typing import Optional
 from urllib.parse import unquote
 from urllib.parse import unquote_plus
 
@@ -37,6 +38,7 @@ from fastapi.requests import Request
 from fastapi.responses import FileResponse
 from fastapi.responses import ORJSONResponse
 from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from fastapi.routing import APIRouter
 from starlette.datastructures import UploadFile as StarletteUploadFile
